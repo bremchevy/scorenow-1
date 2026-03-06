@@ -48,6 +48,7 @@ export default function TopBar({
 
     return (
         <header className={`top-bar ${searchOpen ? "top-bar--search-open" : ""}`}>
+            <div className="glass-highlight" aria-hidden />
             {searchOpen ? (
                 <>
                     <div className="top-bar-search-wrap">

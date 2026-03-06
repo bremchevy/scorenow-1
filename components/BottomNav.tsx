@@ -63,6 +63,7 @@ export default function BottomNav() {
 
     return (
         <nav className="bottom-nav">
+            <div className="glass-highlight" aria-hidden />
             {tabs.map((tab) => {
                 const active = isActive(tab.href);
                 return (

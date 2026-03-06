@@ -11,6 +11,7 @@ function LeagueHeader({ leagueKey, matches }: { leagueKey: string; matches: Matc
 
     return (
         <div className="league-header">
+            <div className="glass-highlight" aria-hidden />
             {league.logo ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={league.logo} alt={league.name} className="league-logo" />

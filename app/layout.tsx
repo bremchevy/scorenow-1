@@ -26,6 +26,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <div className="app-bg" aria-hidden />
         <div className="app-shell">
           <AppShell>{children}</AppShell>
           <BottomNav />
