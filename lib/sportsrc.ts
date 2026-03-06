@@ -275,6 +275,74 @@ export function getTodayDate(): string {
     return new Date().toISOString().split("T")[0];
 }
 
+/** Major leagues to always show in the Leagues page even if no matches in range */
+export const MAJOR_LEAGUES = [
+    "Premier League",
+    "La Liga",
+    "Serie A",
+    "Bundesliga",
+    "Ligue 1",
+    "UEFA Champions League",
+    "UEFA Europa League",
+    "UEFA Europa Conference League",
+    "FA Cup",
+    "Carabao Cup",
+    "Copa del Rey",
+    "Coppa Italia",
+    "Saudi Pro League",
+    "MLS",
+    "Eredivisie",
+    "Liga Portugal",
+    "Championship",
+    "Scottish Premiership",
+];
+
+export interface LeagueInfo {
+    id: string;
+    name: string;
+    country?: string;
+    logo?: string;
+}
+
+/**
+ * Try to fetch all leagues from the API (if supported).
+ * Returns empty array if the API does not support type=leagues.
+ */
+export async function getLeagues(): Promise<LeagueInfo[]> {
+    try {
+        const data = await fetchSportsRC({ type: "leagues", sport: "football" });
+        if (!data) return [];
+        const raw = data.data ?? data.leagues ?? data;
+        if (!Array.isArray(raw)) return [];
+        return raw.map((item: any) => ({
+            id: String(item.id ?? item.league_id ?? ""),
+            name: String(item.name ?? item.league_name ?? "Unknown"),
+            country: item.country ? String(item.country) : undefined,
+            logo: item.logo ? String(item.logo) : undefined,
+        })).filter((l: LeagueInfo) => l.id || l.name !== "Unknown");
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Ensures major leagues appear in grouped even when they have no matches in the fetched range.
+ * Adds placeholder entries (empty match array) for each major league not already present.
+ */
+export function ensureMajorLeaguesInGrouped(grouped: Record<string, Match[]>): Record<string, Match[]> {
+    const out = { ...grouped };
+    const existingNames = new Set(
+        Object.keys(out).map((k) => (k.startsWith("_placeholder__") ? k.replace("_placeholder__", "") : k.split("__")[1] ?? ""))
+    );
+    for (const name of MAJOR_LEAGUES) {
+        if (existingNames.has(name)) continue;
+        const key = `_placeholder__${name}`;
+        if (!out[key]) out[key] = [];
+        existingNames.add(name);
+    }
+    return out;
+}
+
 const TOP_LEAGUES = [
     "Premier League",
     "La Liga",

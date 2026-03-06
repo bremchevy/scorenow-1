@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
-import TopBar from "@/components/TopBar";
+import AppShell from "@/components/AppShell";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -27,8 +27,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <div className="app-shell">
-          <TopBar />
-          <main className="page-content">{children}</main>
+          <AppShell>{children}</AppShell>
           <BottomNav />
         </div>
       </body>

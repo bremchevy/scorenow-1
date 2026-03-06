@@ -1,9 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getMatches, getTodayDate, Match, groupByLeague } from "@/lib/sportsrc";
+import {
+    getMatches,
+    getTodayDate,
+    getUpcomingMatches,
+    fetchRecentResults,
+    getLeagues,
+    ensureMajorLeaguesInGrouped,
+    Match,
+    groupByLeague,
+} from "@/lib/sportsrc";
 import MatchCard from "@/components/MatchCard";
 import { LeagueSkeleton } from "@/components/MatchSkeleton";
+
+/** Get league display name from group key (id__name or _placeholder__name) */
+function leagueNameFromKey(key: string): string {
+    if (key.startsWith("_placeholder__")) return key.replace("_placeholder__", "");
+    const name = key.split("__")[1];
+    return name ?? key;
+}
+
+/** Sort league keys A–Z by league name */
+function sortLeagueKeysAtoZ(keys: string[]): string[] {
+    return [...keys].sort((a, b) =>
+        leagueNameFromKey(a).localeCompare(leagueNameFromKey(b), undefined, { sensitivity: "base" })
+    );
+}
 
 export default function LeaguesPage() {
     const [grouped, setGrouped] = useState<Record<string, Match[]>>({});
@@ -11,24 +34,38 @@ export default function LeaguesPage() {
     const [activeLeague, setActiveLeague] = useState<string | null>(null);
 
     useEffect(() => {
-        getMatches("all", getTodayDate()).then((matches) => {
-            const g = groupByLeague(matches);
+        const today = getTodayDate();
+        Promise.all([
+            getMatches("all", today),
+            getUpcomingMatches(21),
+            fetchRecentResults(7),
+            getLeagues(),
+        ]).then(([todayMatches, upcomingMatches, recentMatches, apiLeagues]) => {
+            const combined = [...todayMatches, ...upcomingMatches, ...recentMatches];
+            let g = groupByLeague(combined);
+            if (apiLeagues.length > 0) {
+                for (const league of apiLeagues) {
+                    const key = `${league.id}__${league.name}`;
+                    if (!g[key]) g[key] = [];
+                }
+            } else {
+                g = ensureMajorLeaguesInGrouped(g);
+            }
             setGrouped(g);
-            // default to first league
-            const first = Object.keys(g)[0];
-            if (first) setActiveLeague(first);
+            const keys = sortLeagueKeysAtoZ(Object.keys(g));
+            if (keys[0]) setActiveLeague(keys[0]);
             setLoading(false);
         });
     }, []);
 
-    const leagueKeys = Object.keys(grouped);
+    const leagueKeys = sortLeagueKeysAtoZ(Object.keys(grouped));
 
     return (
         <div className="fade-in">
             <div className="section-header">
                 <div>
                     <div className="section-title">Leagues</div>
-                    <div className="section-subtitle">All competitions today</div>
+                    <div className="section-subtitle">All competitions</div>
                 </div>
                 {!loading && (
                     <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
@@ -49,21 +86,28 @@ export default function LeaguesPage() {
 
             {!loading && leagueKeys.length > 0 && (
                 <>
-                    {/* League pill selector */}
-                    <div className="date-pill-row">
-                        {leagueKeys.map((key) => {
-                            const league = grouped[key][0]?.league;
-                            return (
-                                <button
-                                    key={key}
-                                    className={`date-pill${activeLeague === key ? " active" : ""}`}
-                                    onClick={() => setActiveLeague(key)}
-                                    style={{ cursor: "pointer", fontFamily: "inherit", border: activeLeague === key ? "none" : undefined }}
-                                >
-                                    {league?.name ?? key.split("__")[1]}
-                                </button>
-                            );
-                        })}
+                    {/* League dropdown */}
+                    <div className="league-dropdown-wrap">
+                        <label htmlFor="league-select" className="league-dropdown-label">
+                            Choose league
+                        </label>
+                        <select
+                            id="league-select"
+                            className="league-dropdown"
+                            value={activeLeague ?? ""}
+                            onChange={(e) => setActiveLeague(e.target.value || null)}
+                            aria-label="Select league"
+                        >
+                            {leagueKeys.map((key) => {
+                                const league = grouped[key][0]?.league;
+                                const name = league?.name ?? leagueNameFromKey(key);
+                                return (
+                                    <option key={key} value={key}>
+                                        {name} ({grouped[key].length})
+                                    </option>
+                                );
+                            })}
+                        </select>
                     </div>
 
                     {/* Active league matches */}
@@ -79,20 +123,26 @@ export default function LeaguesPage() {
                                     />
                                 ) : (
                                     <span className="league-logo-placeholder">
-                                        {grouped[activeLeague][0]?.league.name.charAt(0)}
+                                        {leagueNameFromKey(activeLeague).charAt(0)}
                                     </span>
                                 )}
-                                <span className="league-name">{grouped[activeLeague][0]?.league.name}</span>
+                                <span className="league-name">{leagueNameFromKey(activeLeague)}</span>
                                 {grouped[activeLeague][0]?.league.country && (
-                                    <span className="league-country">{grouped[activeLeague][0]?.league.country}</span>
+                                    <span className="league-country">{grouped[activeLeague][0].league.country}</span>
                                 )}
                                 <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>
                                     {grouped[activeLeague].length} matches
                                 </span>
                             </div>
-                            {grouped[activeLeague].map((match) => (
-                                <MatchCard key={match.id} match={match} />
-                            ))}
+                            {grouped[activeLeague].length === 0 ? (
+                                <div className="search-hint" style={{ padding: "24px 16px" }}>
+                                    No matches in this period
+                                </div>
+                            ) : (
+                                grouped[activeLeague].map((match) => (
+                                    <MatchCard key={match.id} match={match} />
+                                ))
+                            )}
                         </div>
                     )}
                 </>
