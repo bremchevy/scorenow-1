@@ -19,7 +19,9 @@ async function fetchSportsRC(params: Record<string, string>) {
     const res = await fetch(url.toString());
 
     if (!res.ok) {
-        console.error(`Local Proxy API error: ${res.status} ${res.statusText}`);
+        if (res.status >= 500) {
+            console.error(`Local Proxy API error: ${res.status} ${res.statusText}`);
+        }
         return null;
     }
 
@@ -275,87 +277,68 @@ export function getTodayDate(): string {
     return new Date().toISOString().split("T")[0];
 }
 
-/** Major leagues to always show in the Leagues page even if no matches in range */
-export const MAJOR_LEAGUES = [
+/** Curated leagues shown on the Leagues page (you can edit this list) */
+export const CURATED_LEAGUES = [
+    "UEFA Champions League",
     "Premier League",
     "La Liga",
+    "FIFA World Cup",
+    "FA Cup",
+    "Carabao Cup",
     "Serie A",
     "Bundesliga",
     "Ligue 1",
-    "UEFA Champions League",
-    "UEFA Europa League",
-    "UEFA Europa Conference League",
-    "FA Cup",
-    "Carabao Cup",
-    "Copa del Rey",
-    "Coppa Italia",
-    "Saudi Pro League",
     "MLS",
-    "Eredivisie",
-    "Liga Portugal",
-    "Championship",
-    "Scottish Premiership",
 ];
 
-export interface LeagueInfo {
-    id: string;
-    name: string;
-    country?: string;
-    logo?: string;
+/** Get league name from group key (id__name) */
+function leagueNameFromKey(key: string): string {
+    return key.split("__")[1] ?? key;
 }
 
 /**
- * Try to fetch all leagues from the API (if supported).
- * Returns empty array if the API does not support type=leagues.
+ * Get all matches from grouped that belong to a curated league (by name match).
  */
-export async function getLeagues(): Promise<LeagueInfo[]> {
-    try {
-        const data = await fetchSportsRC({ type: "leagues", sport: "football" });
-        if (!data) return [];
-        const raw = data.data ?? data.leagues ?? data;
-        if (!Array.isArray(raw)) return [];
-        return raw.map((item: any) => ({
-            id: String(item.id ?? item.league_id ?? ""),
-            name: String(item.name ?? item.league_name ?? "Unknown"),
-            country: item.country ? String(item.country) : undefined,
-            logo: item.logo ? String(item.logo) : undefined,
-        })).filter((l: LeagueInfo) => l.id || l.name !== "Unknown");
-    } catch {
-        return [];
+export function getMatchesForCuratedLeague(
+    grouped: Record<string, Match[]>,
+    leagueName: string
+): Match[] {
+    const matches: Match[] = [];
+    const lower = leagueName.toLowerCase();
+    for (const key of Object.keys(grouped)) {
+        const name = leagueNameFromKey(key).toLowerCase();
+        if (name === lower || name.includes(lower) || lower.includes(name)) {
+            matches.push(...grouped[key]);
+        }
     }
+    return matches;
+}
+
+/** Returns true if the match's league is in CURATED_LEAGUES (by name match). */
+function isCuratedLeague(leagueName: string): boolean {
+    const a = leagueName.toLowerCase();
+    return CURATED_LEAGUES.some((curated) => {
+        const b = curated.toLowerCase();
+        return a === b || a.includes(b) || b.includes(a);
+    });
 }
 
 /**
- * Ensures major leagues appear in grouped even when they have no matches in the fetched range.
- * Adds placeholder entries (empty match array) for each major league not already present.
+ * Filter matches to only those from CURATED_LEAGUES. Use on Home, Live, and Scores.
  */
-export function ensureMajorLeaguesInGrouped(grouped: Record<string, Match[]>): Record<string, Match[]> {
-    const out = { ...grouped };
-    const existingNames = new Set(
-        Object.keys(out).map((k) => (k.startsWith("_placeholder__") ? k.replace("_placeholder__", "") : k.split("__")[1] ?? ""))
-    );
-    for (const name of MAJOR_LEAGUES) {
-        if (existingNames.has(name)) continue;
-        const key = `_placeholder__${name}`;
-        if (!out[key]) out[key] = [];
-        existingNames.add(name);
-    }
-    return out;
+export function filterMatchesByCuratedLeagues(matches: Match[]): Match[] {
+    return matches.filter((m) => isCuratedLeague(m.league.name));
 }
 
 const TOP_LEAGUES = [
+    "UEFA Champions League",
     "Premier League",
     "La Liga",
     "Serie A",
     "Bundesliga",
     "Ligue 1",
-    "UEFA Champions League",
-    "UEFA Europa League",
     "FA Cup",
     "Carabao Cup",
-    "Copa del Rey",
-    "Coppa Italia",
-    "Saudi Pro League",
     "MLS",
 ];
 

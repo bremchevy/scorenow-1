@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getMatches, getTodayDate, getUpcomingMatches, fetchRecentResults, Match } from "@/lib/sportsrc";
+import { getMatches, getTodayDate, getUpcomingMatches, fetchRecentResults, filterMatchesByCuratedLeagues, Match } from "@/lib/sportsrc";
 import LeagueGroupList from "@/components/LeagueGroupList";
 import { LeagueSkeleton, LiveMatchSkeleton } from "@/components/MatchSkeleton";
 import MatchCard from "@/components/MatchCard";
@@ -26,9 +26,9 @@ export default function HomePage() {
           getUpcomingMatches(3), // Reduced to 3 days
           fetchRecentResults(2), // Reduced to 2 days
         ]);
-        setLiveMatches(live);
-        setUpcomingMatches(upcoming);
-        setPastMatches(past);
+        setLiveMatches(filterMatchesByCuratedLeagues(live));
+        setUpcomingMatches(filterMatchesByCuratedLeagues(upcoming));
+        setPastMatches(filterMatchesByCuratedLeagues(past));
       } catch (err) {
         console.error("Initial load error:", err);
       } finally {
@@ -43,7 +43,7 @@ export default function HomePage() {
       try {
         setLiveLoading(true);
         const live = await getMatches("inprogress", today);
-        setLiveMatches(live);
+        setLiveMatches(filterMatchesByCuratedLeagues(live));
       } catch (err) {
         console.error("Refresh error:", err);
       } finally {

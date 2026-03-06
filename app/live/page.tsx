@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getMatches, getTodayDate, Match } from "@/lib/sportsrc";
+import { getMatches, getTodayDate, filterMatchesByCuratedLeagues, Match } from "@/lib/sportsrc";
 import LeagueGroupList from "@/components/LeagueGroupList";
 import { LeagueSkeleton } from "@/components/MatchSkeleton";
 
@@ -13,7 +13,7 @@ export default function LivePage() {
 
     const load = async () => {
         const data = await getMatches("inprogress", getTodayDate());
-        setMatches(data);
+        setMatches(filterMatchesByCuratedLeagues(data));
         setLoading(false);
     };
 
