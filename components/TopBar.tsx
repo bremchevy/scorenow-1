@@ -2,6 +2,7 @@
 
 import { useRef, useEffect } from "react";
 import { usePathname } from "next/navigation";
+import ThemeSwitcher from "@/components/ThemeSwitcher";
 
 const pageTitles: Record<string, string> = {
     "/": "ScoreNow",
@@ -94,6 +95,7 @@ export default function TopBar({
                         )}
                     </div>
                     <div className="top-bar-actions">
+                        <ThemeSwitcher />
                         <button
                             className="icon-btn"
                             onClick={onOpenSearch}
