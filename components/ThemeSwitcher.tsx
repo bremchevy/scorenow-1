@@ -1,13 +1,19 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useTheme } from "@/components/ThemeProvider";
 import { THEMES } from "@/lib/theme";
 
 export default function ThemeSwitcher() {
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMounted(typeof document !== "undefined");
+  }, []);
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -19,6 +25,34 @@ export default function ThemeSwitcher() {
     if (open) document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [open]);
+
+  const panelContent = open && (
+    <>
+      <div className="theme-sheet-overlay" onClick={() => setOpen(false)} aria-hidden />
+      <div className="theme-sheet-panel" role="dialog" aria-label="Choose theme">
+        <div className="theme-sheet-handle" aria-hidden />
+        <div className="theme-switcher-label">Theme</div>
+        <div className="theme-switcher-swatches">
+          {THEMES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`theme-swatch${theme === t.id ? " active" : ""}`}
+              onClick={() => {
+                setTheme(t.id);
+                setOpen(false);
+              }}
+              style={{ ["--swatch-color" as string]: t.color }}
+              title={t.label}
+              aria-label={`${t.label} theme`}
+              role="menuitemradio"
+              aria-checked={theme === t.id}
+            />
+          ))}
+        </div>
+      </div>
+    </>
+  );
 
   return (
     <>
@@ -38,34 +72,7 @@ export default function ThemeSwitcher() {
         </button>
       </div>
 
-      {open && (
-        <div className="theme-sheet-overlay" onClick={() => setOpen(false)} aria-hidden />
-      )}
-
-      {open && (
-        <div className="theme-sheet-panel" role="dialog" aria-label="Choose theme">
-          <div className="theme-sheet-handle" aria-hidden />
-          <div className="theme-switcher-label">Theme</div>
-          <div className="theme-switcher-swatches">
-            {THEMES.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={`theme-swatch${theme === t.id ? " active" : ""}`}
-                onClick={() => {
-                  setTheme(t.id);
-                  setOpen(false);
-                }}
-                style={{ ["--swatch-color" as string]: t.color }}
-                title={t.label}
-                aria-label={`${t.label} theme`}
-                role="menuitemradio"
-                aria-checked={theme === t.id}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+      {mounted && panelContent && createPortal(panelContent, document.body)}
     </>
   );
 }
