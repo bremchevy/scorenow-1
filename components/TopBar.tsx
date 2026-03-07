@@ -7,8 +7,6 @@ import ThemeSwitcher from "@/components/ThemeSwitcher";
 const pageTitles: Record<string, string> = {
     "/": "ScoreNow",
     "/live": "Live Now",
-    "/scores": "Scores",
-    "/leagues": "Leagues",
 };
 
 interface TopBarProps {

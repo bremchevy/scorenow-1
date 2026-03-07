@@ -23,11 +23,12 @@ export default function HomePage() {
       try {
         const [live, upcoming, past] = await Promise.all([
           getMatches("inprogress", today),
-          getUpcomingMatches(3), // Reduced to 3 days
-          fetchRecentResults(2), // Reduced to 2 days
+          getUpcomingMatches(7), // Next 7 days for curated leagues
+          fetchRecentResults(2),
         ]);
         setLiveMatches(filterMatchesByCuratedLeagues(live));
-        setUpcomingMatches(filterMatchesByCuratedLeagues(upcoming));
+        // Show all upcoming (no league filter) so we display whatever the API returns
+        setUpcomingMatches(upcoming);
         setPastMatches(filterMatchesByCuratedLeagues(past));
       } catch (err) {
         console.error("Initial load error:", err);

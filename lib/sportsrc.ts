@@ -81,6 +81,20 @@ function normalizeMatch(raw: any, leagueInfo?: any): Match {
     // League info can come from parent object in nested responses
     const leagueData = leagueInfo || raw.league;
 
+    // For upcoming matches, derive date/time from timestamp if present (so we can sort and display)
+    const ts = raw.timestamp ?? raw.match_timestamp;
+    let dateStr = String(raw.date ?? raw.match_date ?? "");
+    let timeStr = String(raw.status_detail ?? raw.time ?? raw.match_time ?? raw.match_status_text ?? raw.status_text ?? raw.minute ?? "");
+    if (ts && (raw.status === "upcoming" || raw.match_status === "upcoming")) {
+        try {
+            const d = new Date(Number(ts));
+            dateStr = d.toISOString().split("T")[0];
+            timeStr = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+        } catch {
+            // keep existing dateStr/timeStr
+        }
+    }
+
     return {
         id: String(raw.id ?? raw.match_id ?? raw.matchId ?? ""),
         homeTeam: {
@@ -96,8 +110,8 @@ function normalizeMatch(raw: any, leagueInfo?: any): Match {
         homeScore: homeScoreVal !== null && homeScoreVal !== undefined ? Number(homeScoreVal) : null,
         awayScore: awayScoreVal !== null && awayScoreVal !== undefined ? Number(awayScoreVal) : null,
         status: String(raw.status ?? raw.match_status ?? "upcoming") as MatchStatus,
-        time: String(raw.status_detail ?? raw.time ?? raw.match_time ?? raw.match_status_text ?? raw.status_text ?? raw.minute ?? ""),
-        date: String(raw.date ?? raw.match_date ?? ""),
+        time: timeStr,
+        date: dateStr,
         league: {
             id: String(leagueData?.id ?? raw.league_id ?? ""),
             name: String(leagueData?.name ?? raw.league_name ?? "Unknown League"),
@@ -167,31 +181,52 @@ export async function getMatches(
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Fetches upcoming matches for a range of days
- * @param days Number of days into the future to fetch
+ * Fetches upcoming matches. Tries without date first (some APIs return "next N" upcoming);
+ * if empty, fetches by date range.
+ * @param days Number of days into the future when using date range
  */
 export async function getUpcomingMatches(days: number = 7): Promise<Match[]> {
-    const dates: string[] = [];
     const today = new Date();
 
-    for (let i = 0; i <= days; i++) {
-        const d = new Date(today);
-        d.setDate(today.getDate() + i);
-        dates.push(d.toISOString().split("T")[0]);
-    }
-
     try {
-        // Fetch matches for all dates sequentially with small delays to avoid 429s
+        // Try without date first – some APIs return all upcoming matches in one call
+        const withoutDate = await getMatches("upcoming", "");
+        if (withoutDate && withoutDate.length > 0) {
+            const sorted = [...withoutDate].sort((a, b) => {
+                const d = (a.date || "").localeCompare(b.date || "");
+                if (d !== 0) return d;
+                return (a.time || "").localeCompare(b.time || "");
+            });
+            return sorted;
+        }
+
+        // Fallback: fetch by date for each of the next N days
+        const dates: string[] = [];
+        for (let i = 0; i <= days; i++) {
+            const d = new Date(today);
+            d.setDate(today.getDate() + i);
+            dates.push(d.toISOString().split("T")[0]);
+        }
+
         const allResults: Match[] = [];
+        const seenIds = new Set<string>();
         for (const date of dates) {
             const result = await getMatches("upcoming", date);
             if (result && result.length > 0) {
-                allResults.push(...result);
+                for (const m of result) {
+                    if (!seenIds.has(m.id)) {
+                        seenIds.add(m.id);
+                        allResults.push(m);
+                    }
+                }
             }
-            // Small pause between requests
             await sleep(500);
         }
-
+        allResults.sort((a, b) => {
+            const d = (a.date || "").localeCompare(b.date || "");
+            if (d !== 0) return d;
+            return (a.time || "").localeCompare(b.time || "");
+        });
         return allResults;
     } catch (err) {
         console.error("getUpcomingMatches error:", err);
@@ -277,11 +312,13 @@ export function getTodayDate(): string {
     return new Date().toISOString().split("T")[0];
 }
 
-/** Curated leagues shown on the Leagues page (you can edit this list) */
+/** Curated leagues shown on the Leagues page (display names; matching is flexible) */
 export const CURATED_LEAGUES = [
     "UEFA Champions League",
     "Premier League",
     "La Liga",
+    "Copa del Rey",
+    "Supercopa de España",
     "FIFA World Cup",
     "FA Cup",
     "Carabao Cup",
@@ -291,49 +328,121 @@ export const CURATED_LEAGUES = [
     "MLS",
 ];
 
+/** Leagues that must be from a specific country (strict: no other region's same-named league) */
+const LEAGUE_REQUIRED_COUNTRY: Record<string, string> = {
+    "Premier League": "England",
+    "La Liga": "Spain",
+    "FA Cup": "England",
+    "Carabao Cup": "England",
+    "Copa del Rey": "Spain",
+    "Supercopa de España": "Spain",
+};
+
+/** Normalize for league name matching (ignore spaces, case) so "La Liga" matches "LaLiga". */
+function normalizeLeagueName(s: string): string {
+    return s.toLowerCase().replace(/\s+/g, "").replace(/[^\w]/g, "");
+}
+
 /** Get league name from group key (id__name) */
 function leagueNameFromKey(key: string): string {
     return key.split("__")[1] ?? key;
 }
 
+/** Required country for a curated league display name (undefined = any country) */
+function getRequiredCountryForCuratedLeague(curatedLeagueName: string): string | undefined {
+    return LEAGUE_REQUIRED_COUNTRY[curatedLeagueName];
+}
+
 /**
  * Get all matches from grouped that belong to a curated league (by name match).
+ * Uses normalized names so e.g. "La Liga" matches "LaLiga", "La Liga Santander", etc.
+ * Enforces country when defined (e.g. Premier League = England only, La Liga = Spain only).
+ * For MLS: also includes all Inter Miami matches (any competition).
  */
 export function getMatchesForCuratedLeague(
     grouped: Record<string, Match[]>,
     leagueName: string
 ): Match[] {
     const matches: Match[] = [];
-    const lower = leagueName.toLowerCase();
+    const curatedNorm = normalizeLeagueName(leagueName);
+    const requiredCountry = getRequiredCountryForCuratedLeague(leagueName);
     for (const key of Object.keys(grouped)) {
-        const name = leagueNameFromKey(key).toLowerCase();
-        if (name === lower || name.includes(lower) || lower.includes(name)) {
-            matches.push(...grouped[key]);
+        const name = leagueNameFromKey(key);
+        const nameNorm = normalizeLeagueName(name);
+        const nameMatches =
+            nameNorm === curatedNorm ||
+            nameNorm.includes(curatedNorm) ||
+            curatedNorm.includes(nameNorm) ||
+            name.toLowerCase().includes(leagueName.toLowerCase()) ||
+            leagueName.toLowerCase().includes(name.toLowerCase());
+        if (!nameMatches) continue;
+        const fromGroup = grouped[key];
+        if (requiredCountry) {
+            matches.push(...fromGroup.filter((m) => m.league.country === requiredCountry));
+        } else {
+            matches.push(...fromGroup);
+        }
+    }
+    // MLS tab: also include all Inter Miami matches from any league (e.g. Leagues Cup)
+    if (curatedNorm === "mls") {
+        const seen = new Set(matches.map((m) => m.id));
+        for (const groupMatches of Object.values(grouped)) {
+            for (const m of groupMatches) {
+                if (isInterMiamiMatch(m) && !seen.has(m.id)) {
+                    matches.push(m);
+                    seen.add(m.id);
+                }
+            }
         }
     }
     return matches;
 }
 
-/** Returns true if the match's league is in CURATED_LEAGUES (by name match). */
-function isCuratedLeague(leagueName: string): boolean {
-    const a = leagueName.toLowerCase();
+/** Returns true if the match's league is in CURATED_LEAGUES (by name match) and passes country when required. */
+function isCuratedLeague(leagueName: string, leagueCountry?: string): boolean {
+    const a = normalizeLeagueName(leagueName);
+    const aLower = leagueName.toLowerCase();
     return CURATED_LEAGUES.some((curated) => {
-        const b = curated.toLowerCase();
-        return a === b || a.includes(b) || b.includes(a);
+        const b = normalizeLeagueName(curated);
+        const bLower = curated.toLowerCase();
+        const nameMatches =
+            a === b ||
+            a.includes(b) ||
+            b.includes(a) ||
+            aLower.includes(bLower) ||
+            bLower.includes(aLower);
+        if (!nameMatches) return false;
+        const requiredCountry = LEAGUE_REQUIRED_COUNTRY[curated];
+        if (!requiredCountry) return true;
+        return leagueCountry === requiredCountry;
     });
+}
+
+/** Whether the match involves Inter Miami (home or away). */
+export function isInterMiamiMatch(m: Match): boolean {
+    const name = (s: string) => s.toLowerCase().includes("inter miami");
+    return name(m.homeTeam.name) || name(m.awayTeam.name);
 }
 
 /**
  * Filter matches to only those from CURATED_LEAGUES. Use on Home, Live, and Scores.
+ * Premier League = England only; La Liga and Spanish cups = Spain only.
+ * All Inter Miami matches are always included, plus all other MLS matches.
  */
 export function filterMatchesByCuratedLeagues(matches: Match[]): Match[] {
-    return matches.filter((m) => isCuratedLeague(m.league.name));
+    return matches.filter(
+        (m) =>
+            isCuratedLeague(m.league.name, m.league.country) ||
+            isInterMiamiMatch(m)
+    );
 }
 
 const TOP_LEAGUES = [
     "UEFA Champions League",
     "Premier League",
     "La Liga",
+    "Copa del Rey",
+    "Supercopa de España",
     "Serie A",
     "Bundesliga",
     "Ligue 1",

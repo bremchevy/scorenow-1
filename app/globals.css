@@ -1100,10 +1100,15 @@ body {
   animation: pulse-text 1.5s infinite;
 }
 
-.upcoming-time {
-  font-size: 14px;
-  font-weight: 700;
+.upcoming-time,
+.upcoming-datetime {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-secondary);
+}
+
+.upcoming-datetime {
+  white-space: nowrap;
 }
 
 .dash-score {

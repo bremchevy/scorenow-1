@@ -21,6 +21,23 @@ function TeamLogo({ src, name }: { src?: string; name: string }) {
     );
 }
 
+function formatUpcomingDate(dateStr: string): string {
+    if (!dateStr) return "";
+    try {
+        const d = new Date(dateStr + "T12:00:00");
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        d.setHours(0, 0, 0, 0);
+        if (d.getTime() === today.getTime()) return "Today";
+        if (d.getTime() === tomorrow.getTime()) return "Tomorrow";
+        return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+    } catch {
+        return dateStr;
+    }
+}
+
 export default function MatchCard({ match, onClick }: MatchCardProps) {
     const isLive = match.status === "inprogress";
     const isFinished = match.status === "finished";
@@ -28,7 +45,6 @@ export default function MatchCard({ match, onClick }: MatchCardProps) {
 
     const formatTime = (t?: string) => {
         if (!t) return "";
-        // Try to format as HH:MM if it's an ISO time or just return as-is
         if (t.includes("T")) {
             try {
                 return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -83,7 +99,11 @@ export default function MatchCard({ match, onClick }: MatchCardProps) {
                 )}
                 {isUpcoming && (
                     <>
-                        <span className="upcoming-time">{formatTime(match.time) || "--:--"}</span>
+                        <span className="upcoming-datetime">
+                            {formatUpcomingDate(match.date)}
+                            {match.date && (match.time || formatTime(match.time)) ? " · " : ""}
+                            {formatTime(match.time) || match.time || "--:--"}
+                        </span>
                         <span className="dash-score">vs</span>
                     </>
                 )}
