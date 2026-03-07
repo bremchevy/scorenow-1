@@ -30,6 +30,7 @@ export default function HomePage() {
         // Show all upcoming (no league filter) so we display whatever the API returns
         setUpcomingMatches(upcoming);
         setPastMatches(filterMatchesByCuratedLeagues(past));
+        console.log("[Home] initial load", { live: live.length, liveFiltered: filterMatchesByCuratedLeagues(live).length, upcoming: upcoming.length, past: past.length });
       } catch (err) {
         console.error("Initial load error:", err);
       } finally {

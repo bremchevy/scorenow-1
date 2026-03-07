@@ -39,6 +39,9 @@ export async function GET(req: NextRequest) {
     if (status) url.searchParams.set("status", status);
     if (date) url.searchParams.set("date", date);
 
+    // Debug: log request (no key value)
+    console.log("[matches API] request", { type, sport, status, date, hasKey: !!API_KEY });
+
     try {
         const res = await fetch(url.toString(), {
             headers: {
@@ -49,6 +52,11 @@ export async function GET(req: NextRequest) {
         });
 
         const data = await res.json().catch(() => null);
+
+        // Debug: log response summary
+        const dataArray = data?.data ?? data?.matches ?? (Array.isArray(data) ? data : null);
+        const count = Array.isArray(dataArray) ? dataArray.length : (data?.total_matches ?? "?");
+        console.log("[matches API] response", { status: res.status, ok: res.ok, success: data?.success, count });
 
         if (res.ok && data) {
             globalCache.set(cacheKey, { data, timestamp: now });

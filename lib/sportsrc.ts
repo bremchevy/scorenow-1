@@ -16,9 +16,11 @@ async function fetchSportsRC(params: Record<string, string>) {
     const url = new URL(endpoint, typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 
+    console.log("[sportsrc] fetch", params);
     const res = await fetch(url.toString());
 
     if (!res.ok) {
+        console.warn("[sportsrc] fetch not ok", { url: url.toString(), status: res.status, statusText: res.statusText });
         if (res.status >= 500) {
             console.error(`Local Proxy API error: ${res.status} ${res.statusText}`);
         }
@@ -26,6 +28,9 @@ async function fetchSportsRC(params: Record<string, string>) {
     }
 
     const data = await res.json();
+    const dataArray = data?.data ?? data?.matches ?? (Array.isArray(data) ? data : null);
+    const matchCount = Array.isArray(dataArray) ? dataArray.length : 0;
+    console.log("[sportsrc] response", { ...params, matchCount, hasData: !!data });
     cache.set(cacheKey, { data, timestamp: Date.now() });
     return data;
 }
@@ -147,30 +152,89 @@ export async function getMatches(
         }
 
         const data = await fetchSportsRC(params);
-        if (!data) return [];
+        if (!data) {
+            console.log("[sportsrc] getMatches no data", { status, date });
+            return [];
+        }
 
-        const rawData = data.data ?? data.matches ?? data;
+        // API can return: { data: [...] } or { data: { leagues: [...] } } or { data: { ... } }; extract league-group array
+        let rawData: unknown = data.data ?? data.matches ?? data.results ?? data.fixtures ?? data.events ?? data;
+        if (Array.isArray(data.data)) rawData = data.data;
+        if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
+            const obj = rawData as Record<string, unknown>;
+            const inner = obj.data ?? obj.leagues ?? obj.matches ?? obj.results ?? obj.fixtures ?? obj.events;
+            if (Array.isArray(inner)) rawData = inner;
+            else {
+                // Find first value that is an array of league-group objects (have .league and .matches)
+                for (const v of Object.values(obj)) {
+                    if (Array.isArray(v) && v.length > 0 && v.some((x: any) => x?.league && Array.isArray(x?.matches))) {
+                        rawData = v;
+                        break;
+                    }
+                }
+            }
+        }
+
+        console.log("[sportsrc] getMatches raw", { status, date, isArray: Array.isArray(rawData), length: Array.isArray(rawData) ? rawData.length : "n/a" });
 
         // Handle nested structure: data -> [ { league: {}, matches: [] } ]
         if (Array.isArray(rawData)) {
             const allMatches: Match[] = [];
             rawData.forEach((item: any) => {
-                if (item.matches && Array.isArray(item.matches)) {
-                    // This is the league-grouped format
+                if (item && item.matches && Array.isArray(item.matches)) {
                     item.matches.forEach((m: any) => {
                         allMatches.push(normalizeMatch(m, item.league));
                     });
-                } else if (item.teams || item.home_name) {
-                    // This is a direct match object format
+                } else if (item && (item.teams || item.home_name)) {
                     allMatches.push(normalizeMatch(item));
                 }
             });
+            console.log("[sportsrc] getMatches parsed", { status, date, count: allMatches.length });
             return allMatches;
         }
 
+        const rawKeys = typeof rawData === "object" && rawData !== null ? Object.keys(rawData).join(", ") : "";
+        const topKeys = typeof data === "object" && data !== null ? Object.keys(data).join(", ") : "";
+        console.log("[sportsrc] getMatches rawData not array", { status, date, rawKeys, topLevelKeys: topKeys });
+
+        // rawData may be data.data (object with 5 keys) – find any array inside it
+        let fallbackArray: any[] | null = null;
+        const obj = (rawData === data ? (data as any)?.data : rawData) ?? rawData;
+        if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+            for (const v of Object.values(obj)) {
+                if (!Array.isArray(v) || v.length === 0) continue;
+                const first = v[0];
+                if (first && typeof first === "object") {
+                    if ((first as any).matches && Array.isArray((first as any).matches)) {
+                        fallbackArray = v as any[];
+                        break;
+                    }
+                    if ((first as any).teams || (first as any).league) {
+                        fallbackArray = v as any[];
+                        break;
+                    }
+                }
+            }
+            if (!fallbackArray && typeof obj === "object") {
+                const allArrs = (Object.values(obj) as any[]).filter((v) => Array.isArray(v) && v.length > 0);
+                if (allArrs.length > 0) fallbackArray = allArrs.flat();
+            }
+        }
+        if (fallbackArray && fallbackArray.length > 0) {
+            const allMatches: Match[] = [];
+            fallbackArray.forEach((item: any) => {
+                if (item && item.matches && Array.isArray(item.matches)) {
+                    item.matches.forEach((m: any) => allMatches.push(normalizeMatch(m, item.league)));
+                } else if (item && (item.teams || item.home_name)) {
+                    allMatches.push(normalizeMatch(item));
+                }
+            });
+            console.log("[sportsrc] getMatches parsed (fallback)", { status, date, count: allMatches.length });
+            return allMatches;
+        }
         return [];
     } catch (err) {
-        console.error("getMatches error:", err);
+        console.error("[sportsrc] getMatches error:", err);
         return [];
     }
 }
@@ -190,8 +254,10 @@ export async function getUpcomingMatches(days: number = 7): Promise<Match[]> {
 
     try {
         // Try without date first – some APIs return all upcoming matches in one call
+        console.log("[sportsrc] getUpcomingMatches: trying without date first");
         const withoutDate = await getMatches("upcoming", "");
         if (withoutDate && withoutDate.length > 0) {
+            console.log("[sportsrc] getUpcomingMatches: got", withoutDate.length, "from no-date request");
             const sorted = [...withoutDate].sort((a, b) => {
                 const d = (a.date || "").localeCompare(b.date || "");
                 if (d !== 0) return d;
@@ -200,6 +266,7 @@ export async function getUpcomingMatches(days: number = 7): Promise<Match[]> {
             return sorted;
         }
 
+        console.log("[sportsrc] getUpcomingMatches: no-date empty, falling back to date range (days=" + days + ")");
         // Fallback: fetch by date for each of the next N days
         const dates: string[] = [];
         for (let i = 0; i <= days; i++) {
@@ -227,9 +294,10 @@ export async function getUpcomingMatches(days: number = 7): Promise<Match[]> {
             if (d !== 0) return d;
             return (a.time || "").localeCompare(b.time || "");
         });
+        console.log("[sportsrc] getUpcomingMatches: date range total", allResults.length, "dates tried:", dates.length);
         return allResults;
     } catch (err) {
-        console.error("getUpcomingMatches error:", err);
+        console.error("[sportsrc] getUpcomingMatches error:", err);
         return [];
     }
 }
